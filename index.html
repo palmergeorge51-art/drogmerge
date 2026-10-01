@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Drop &amp; Merge: Fruit Edition</title>
+<style>
+  :root{
+    --ink:#22304F;
+    --paper:#E4ECF4;
+    --card:#FFFFFF;
+    --coffee:#FFDD00;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--paper);color:var(--ink);
+    font-family:ui-rounded,"SF Pro Rounded","Nunito","Avenir Next Rounded",system-ui,-apple-system,"Segoe UI",sans-serif;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  .app{height:100%;max-width:460px;margin:0 auto;display:flex;flex-direction:column;
+    padding:calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom))}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1}
+  .stats{display:flex;gap:8px}
+  .stat{background:var(--card);border-radius:12px;padding:5px 12px;min-width:76px;text-align:right}
+  .stat small{display:block;font-size:11px;font-weight:600;opacity:.6}
+  .stat b{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+  .row{display:flex;align-items:center;gap:12px;margin:8px 0 6px}
+  .next{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+  .next canvas{width:44px;height:44px;background:var(--card);border-radius:50%}
+  .chain{flex:1;display:flex;align-items:center;justify-content:space-between;gap:1px;min-width:0;
+    font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;line-height:1}
+  .chain span{flex:none}
+  .stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+  .frame{position:relative}
+  canvas#c{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+  .over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    background:rgba(228,236,244,.88);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);text-align:center;border-radius:12px}
+  .over[hidden]{display:none}
+  .over h2{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .over p{font-size:16px;font-weight:600}
+  .over p b{font-weight:800;font-variant-numeric:tabular-nums}
+  .over .actions{display:flex;gap:8px;margin-top:6px}
+  footer{display:flex;flex-direction:column;gap:8px;padding-top:8px}
+  .tools{display:flex;justify-content:center;gap:8px}
+  .btn{border:0;background:var(--card);color:var(--ink);font:inherit;font-weight:700;font-size:14px;
+    padding:9px 16px;border-radius:12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .btn.primary{background:var(--ink);color:#fff;font-size:16px;padding:12px 24px}
+  .btn.bmc{background:var(--coffee);color:#1a1a1a;font-size:15px;padding:11px 16px;width:100%}
+  .btn:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+  .btn:active{transform:scale(.97)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Drop &amp; Merge</h1>
+    <div class="stats">
+      <div class="stat"><small>Score</small><b id="score">0</b></div>
+      <div class="stat"><small>Best</small><b id="best">0</b></div>
+    </div>
+  </header>
+
+  <div class="row">
+    <div class="next"><span>Next</span><canvas id="next"></canvas></div>
+    <div class="chain" id="chain" role="img" aria-label="Merge order: cherry, strawberry, grape, lemon, orange, apple, pear, peach, pineapple, melon, watermelon"></div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="frame" id="frame">
+      <canvas id="c" aria-label="Game board. Move to aim, release to drop."></canvas>
+      <div class="over" id="over" hidden>
+        <h2>Jar's full</h2>
+        <p>Score <b id="finalScore">0</b></p>
+        <p>Best <b id="finalBest">0</b></p>
+        <div class="actions">
+          <button class="btn primary" id="again">Play again</button>
+          <button class="btn primary" id="shareOver">Share</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="tools">
+      <button class="btn" id="restart">New game</button>
+      <button class="btn" id="share">Share</button>
+      <button class="btn" id="mute" aria-pressed="false">Sound on</button>
+    </div>
+    <a class="btn bmc" href="https://www.buymeacoffee.com/gorj" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- Config ----------
+  const W = 360, H = 600;
+  const WL = 6, WR = W - 6, FLOOR = H - 6;
+  const JAR_TOP = 130, DANGER = 130, DROP_Y = 62;
+  const G = 1700;
+  const SUB = 6, ITER = 3;
+  const MAXLV = 10;
+  const FRUIT = ['🍒','🍓','🍇','🍋','🍊','🍎','🍐','🍑','🍍','🍈','🍉'];
+  const NAME  = ['Cherry','Strawberry','Grape','Lemon','Orange','Apple','Pear','Peach','Pineapple','Melon','Watermelon'];
+  const R     = [14, 19, 25, 31, 38, 46, 54, 63, 72, 82, 92];
+  const PTS   = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+  const COL   = ['#C9304B','#FF7D8C','#A47AE0','#FFE45C','#FFAE45','#EF5B55','#C3DE57','#FFBFA3','#F5CB3C','#A9E4B0','#4DB868'];
+  const INK = '#22304F', GOLD = '#FFC93C';
+  const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- Colour helpers ----------
+  const rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+  const mix = (h, t) => {
+    const [r, g, b] = rgb(h), k = t > 0 ? 255 : 0, a = Math.abs(t);
+    return `rgb(${Math.round(r + (k - r) * a)},${Math.round(g + (k - g) * a)},${Math.round(b + (k - b) * a)})`;
+  };
+  const HI = COL.map(c => mix(c, .55)), LO = COL.map(c => mix(c, -.12)), EDGE = COL.map(c => mix(c, -.4));
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const cv = $('c'), ctx = cv.getContext('2d');
+  const nextCv = $('next'), nctx = nextCv.getContext('2d');
+  const stage = $('stage'), frame = $('frame'), overEl = $('over');
+  let view = 1, dpr = 1;
+
+  // merge-order legend
+  FRUIT.forEach((f, i) => {
+    const s = document.createElement('span');
+    s.textContent = f; s.title = NAME[i];
+    s.style.fontSize = (11 + i * 1.1) + 'px';
+    $('chain').appendChild(s);
+  });
+
+  // ---------- State ----------
+  let balls, parts, floats, score, best = 0, cur, next, aimX, canDrop, cdT, spawnT,
+      over, dangerT, combo, comboT, won, drops, shake, last = 0;
+  const keys = {};
+
+  const randLv = () => { const r = Math.random(); return r < .36 ? 0 : r < .66 ? 1 : r < .88 ? 2 : 3; };
+
+  function makeBall(x, y, lv, grow) {
+    const r = R[lv];
+    return { x, y, vx: 0, vy: 0, lv, r, m: r * r, age: 0, t: grow ? 0 : 9, dead: false, mg: false };
+  }
+
+  function reset() {
+    balls = []; parts = []; floats = [];
+    score = 0; combo = 0; comboT = 0; over = false; won = false; dangerT = 0; drops = 0; shake = 0;
+    cur = randLv(); next = randLv(); canDrop = true; cdT = 0; spawnT = 0; aimX = W / 2;
+    overEl.hidden = true;
+    ui(); drawNext();
+  }
+
+  // ---------- Audio ----------
+  let ac = null, muted = false;
+  function wake() {
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (ac && ac.state === 'suspended') ac.resume();
+  }
+  function tone(f, d, type = 'sine', v = .12, slide = 0) {
+    if (muted || !ac) return;
+    const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(f * slide, t + d);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d);
+  }
+
+  // ---------- Best score (persisted when storage is available) ----------
+  async function loadBest() {
+    try { if (window.storage) { const r = await window.storage.get('dm:best'); if (r && r.value) best = +r.value || 0; } } catch (e) {}
+    ui();
+  }
+  async function saveBest() {
+    try { if (window.storage) await window.storage.set('dm:best', String(best)); } catch (e) {}
+  }
+
+  // ---------- UI ----------
+  const fmt = n => n.toLocaleString('en-US');
+  function ui() { $('score').textContent = fmt(score); $('best').textContent = fmt(Math.max(best, score)); }
+
+  function drawNext() {
+    const s = 44 * dpr;
+    nextCv.width = s; nextCv.height = s;
+    nctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    nctx.clearRect(0, 0, 44, 44);
+    const k = Math.min(1, 18 / R[next]);
+    drawBall(nctx, 22, 22, R[next], next, k);
+  }
+
+  // ---------- Drawing ----------
+  function drawBall(c, x, y, r0, lv, s = 1) {
+    const r = r0 * s;
+    c.save(); c.translate(x, y);
+    c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2);
+    const g = c.createRadialGradient(-r * .35, -r * .4, r * .1, 0, 0, r);
+    g.addColorStop(0, HI[lv]); g.addColorStop(.6, COL[lv]); g.addColorStop(1, LO[lv]);
+    c.fillStyle = g; c.fill();
+    c.lineWidth = Math.max(1.5, r * .07); c.strokeStyle = EDGE[lv]; c.stroke();
+    if (lv === MAXLV) {
+      c.beginPath(); c.arc(0, 0, r * .86, 0, Math.PI * 2);
+      c.lineWidth = Math.max(1.5, r * .05); c.strokeStyle = GOLD; c.stroke();
+    }
+    c.beginPath(); c.ellipse(-r * .4, -r * .5, r * .22, r * .11, -.6, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(255,255,255,.4)'; c.fill();
+    c.font = `${r * 1.3}px ${EMOJI_FONT}`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = '#000';
+    c.fillText(FRUIT[lv], 0, r * .07);
+    c.restore();
+  }
+
+  const eob = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function jarPath(c) {
+    const rad = 10;
+    c.beginPath();
+    c.moveTo(3, JAR_TOP); c.lineTo(3, H - 3 - rad);
+    c.arcTo(3, H - 3, 3 + rad, H - 3, rad);
+    c.lineTo(W - 3 - rad, H - 3);
+    c.arcTo(W - 3, H - 3, W - 3, H - 3 - rad, rad);
+    c.lineTo(W - 3, JAR_TOP);
+  }
+
+  function draw() {
+    ctx.setTransform(view, 0, 0, view, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > .1) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+
+    jarPath(ctx); ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fill();
+
+    if (canDrop && !over) {
+      const r = R[cur], x = clamp(aimX, WL + r + 1, WR - r - 1);
+      ctx.save();
+      ctx.setLineDash([4, 7]); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(34,48,79,.22)';
+      ctx.beginPath(); ctx.moveTo(x, DROP_Y + r); ctx.lineTo(x, FLOOR); ctx.stroke();
+      ctx.restore();
+      const k = Math.min(1, spawnT / .2);
+      drawBall(ctx, x, DROP_Y, r, cur, .5 * eob(k) + .5 * k);
+    }
+
+    for (const b of balls) {
+      let s = 1;
+      if (b.t < .28) s = .5 + .5 * eob(b.t / .28);
+      drawBall(ctx, b.x, b.y, b.r, b.lv, s);
+    }
+
+    jarPath(ctx);
+    ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = INK; ctx.stroke();
+
+    ctx.save();
+    ctx.setLineDash([10, 8]); ctx.lineWidth = 3;
+    if (dangerT > 0) ctx.strokeStyle = `rgba(242,83,107,${.55 + .45 * Math.sin(performance.now() / 90)})`;
+    else ctx.strokeStyle = 'rgba(34,48,79,.2)';
+    ctx.beginPath(); ctx.moveTo(WL, DANGER); ctx.lineTo(WR, DANGER); ctx.stroke();
+    ctx.restore();
+
+    for (const p of parts) {
+      ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+      ctx.fillStyle = p.c;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const f of floats) {
+      ctx.globalAlpha = clamp(f.life / f.max * 1.6, 0, 1);
+      ctx.font = `800 ${f.size}px ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif`;
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(f.text, f.x, f.y);
+      ctx.fillStyle = INK; ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+
+    if (drops === 0 && !over) {
+      ctx.font = '700 14px ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif';
+      ctx.fillStyle = 'rgba(34,48,79,.6)'; ctx.textAlign = 'center';
+      ctx.fillText('Move to aim, release to drop', W / 2, 22);
+      ctx.fillText('Two of the same fruit merge', W / 2, 40);
+    }
+    ctx.restore();
+  }
+
+  // ---------- Effects ----------
+  function burst(x, y, lv, n) {
+    if (reduced) n = Math.min(n, 4);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 220;
+      parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, s: 2 + Math.random() * 3.5,
+                   c: i % 3 === 0 ? '#FFFFFF' : COL[lv], life: .5 + Math.random() * .3, max: .8 });
+    }
+  }
+  function floatText(x, y, text, size = 18, life = .9) { floats.push({ x, y, text, size, life, max: life }); }
+
+  // ---------- Physics ----------
+  function wall(b) {
+    if (b.x - b.r < WL) { b.x = WL + b.r; if (b.vx < 0) b.vx *= -.1; }
+    if (b.x + b.r > WR) { b.x = WR - b.r; if (b.vx > 0) b.vx *= -.1; }
+    if (b.y + b.r > FLOOR) {
+      b.y = FLOOR - b.r;
+      if (b.vy > 0) b.vy *= b.vy > 220 ? -.15 : 0;
+      b.vx *= .97;
+    }
+  }
+
+  const mergeList = [];
+  function collide(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, rr = a.r + b.r;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= rr * rr) return;
+    const d = Math.sqrt(d2) || .0001, nx = dx / d, ny = dy / d;
+
+    if (a.lv === b.lv && !a.mg && !b.mg && !a.dead && !b.dead) {
+      a.mg = b.mg = true; mergeList.push([a, b]);
+    }
+
+    const overlap = (rr - d) * .55, tot = a.m + b.m;
+    a.x -= nx * overlap * (b.m / tot); a.y -= ny * overlap * (b.m / tot);
+    b.x += nx * overlap * (a.m / tot); b.y += ny * overlap * (a.m / tot);
+
+    const ia = 1 / a.m, ib = 1 / b.m;
+    const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+    const vn = rvx * nx + rvy * ny;
+    if (vn < 0) {
+      const e = vn < -140 ? .2 : 0;
+      const j = -(1 + e) * vn / (ia + ib);
+      a.vx -= j * nx * ia; a.vy -= j * ny * ia;
+      b.vx += j * nx * ib; b.vy += j * ny * ib;
+    }
+    const tx = -ny, ty = nx, vt = rvx * tx + rvy * ty;
+    const jt = -vt * .05 / (ia + ib);
+    a.vx -= jt * tx * ia; a.vy -= jt * ty * ia;
+    b.vx += jt * tx * ib; b.vy += jt * ty * ib;
+  }
+
+  function doMerge(a, b) {
+    if (a.dead || b.dead) return;
+    a.dead = b.dead = true;
+    const tot = a.m + b.m;
+    const x = (a.x * a.m + b.x * b.m) / tot, y = (a.y * a.m + b.y * b.m) / tot;
+
+    if (comboT > 0) combo++; else combo = 1;
+    comboT = .8;
+
+    if (a.lv === MAXLV) {
+      const pts = 4096 * combo;
+      score += pts; burst(x, y, MAXLV, 40);
+      floatText(x, y, '+' + fmt(pts), 26, 1.4);
+      tone(880, .5, 'triangle', .16, 1.5); shake = 10;
+      return;
+    }
+    const lv = a.lv + 1, nb = makeBall(0, 0, lv, true);
+    nb.x = clamp(x, WL + nb.r, WR - nb.r);
+    nb.y = Math.min(y, FLOOR - nb.r);
+    nb.vx = (a.vx * a.m + b.vx * b.m) / tot * .5;
+    nb.vy = (a.vy * a.m + b.vy * b.m) / tot * .5;
+    nb.age = Math.max(a.age, b.age);
+    balls.push(nb);
+
+    const pts = PTS[lv] * combo;
+    score += pts;
+    burst(nb.x, nb.y, lv, 8 + lv * 2);
+    floatText(nb.x, nb.y - nb.r * .6, '+' + fmt(pts) + (combo > 1 ? ' ×' + combo : ''), 16 + Math.min(lv, 8));
+    tone(250 * Math.pow(1.12, lv), .2, 'triangle', .14, 1.5);
+    if (lv >= 7 && !reduced) shake = Math.max(shake, 4 + (lv - 7) * 2);
+    if (lv === MAXLV && !won) {
+      won = true;
+      floatText(W / 2, H / 2, 'Watermelon!', 40, 2.4);
+      floatText(W / 2, H / 2 + 38, 'Keep going for a higher score', 16, 2.4);
+    }
+  }
+
+  function update(dt) {
+    comboT -= dt; shake *= Math.pow(.001, dt);
+    for (const p of parts) { p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    parts = parts.filter(p => p.life > 0);
+    for (const f of floats) { f.y -= 30 * dt; f.life -= dt; }
+    floats = floats.filter(f => f.life > 0);
+    for (const b of balls) b.t += dt;
+    if (over) return;
+
+    if (keys.ArrowLeft || keys.a) aimX -= 280 * dt;
+    if (keys.ArrowRight || keys.d) aimX += 280 * dt;
+    aimX = clamp(aimX, 0, W);
+
+    if (!canDrop) {
+      cdT -= dt;
+      if (cdT <= 0) { cur = next; next = randLv(); canDrop = true; spawnT = 0; drawNext(); }
+    } else spawnT += dt;
+
+    const h = dt / SUB;
+    for (let s = 0; s < SUB; s++) {
+      for (const b of balls) {
+        b.vy += G * h; b.x += b.vx * h; b.y += b.vy * h;
+        const d = 1 - .25 * h; b.vx *= d; b.vy *= d;
+        wall(b);
+      }
+      for (let it = 0; it < ITER; it++) {
+        for (let i = 0; i < balls.length; i++)
+          for (let j = i + 1; j < balls.length; j++) collide(balls[i], balls[j]);
+        for (const b of balls) wall(b);
+      }
+      if (mergeList.length) {
+        const list = mergeList.splice(0);
+        for (const [a, b] of list) doMerge(a, b);
+        balls = balls.filter(b => !b.dead);
+        ui();
+      }
+    }
+
+    let danger = false;
+    for (const b of balls) {
+      b.age += dt;
+      if (b.age > 1.2 && b.y - b.r < DANGER && Math.hypot(b.vx, b.vy) < 90) danger = true;
+    }
+    dangerT = danger ? dangerT + dt : Math.max(0, dangerT - dt * 1.5);
+    if (dangerT > 2.2) gameOver();
+  }
+
+  function drop() {
+    if (!canDrop || over) return;
+    wake();
+    const r = R[cur], x = clamp(aimX, WL + r + 1, WR - r - 1);
+    const b = makeBall(x, DROP_Y, cur, false);
+    b.vy = 120;
+    balls.push(b);
+    drops++; canDrop = false; cdT = .5;
+    tone(180, .09, 'sine', .09, .6);
+  }
+
+  function gameOver() {
+    over = true;
+    if (score > best) { best = score; saveBest(); }
+    $('finalScore').textContent = fmt(score);
+    $('finalBest').textContent = fmt(best);
+    ui();
+    tone(220, .6, 'sawtooth', .07, .4);
+    overEl.hidden = false;
+    $('again').focus({ preventScroll: true });
+  }
+
+  // ---------- Share ----------
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand('copy'); ta.remove(); return ok;
+    } catch (e) { return false; }
+  }
+  async function share(btn) {
+    const text = score > 0
+      ? `I scored ${fmt(score)} in Drop & Merge 🍉 Can you make the watermelon?`
+      : 'Try Drop & Merge 🍉 Merge fruits all the way up to the watermelon.';
+    const url = location.href;
+    const label = btn.textContent;
+    const flash = msg => { btn.textContent = msg; setTimeout(() => { btn.textContent = label; }, 1600); };
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Drop & Merge', text, url }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    flash(await copyText(`${text} ${url}`) ? 'Copied' : 'Copy failed');
+  }
+  $('share').addEventListener('click', e => share(e.currentTarget));
+  $('shareOver').addEventListener('click', e => share(e.currentTarget));
+
+  // ---------- Input ----------
+  function setAim(e) {
+    const rc = cv.getBoundingClientRect();
+    aimX = (e.clientX - rc.left) / rc.width * W;
+  }
+  cv.addEventListener('pointerdown', e => { setAim(e); try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
+  cv.addEventListener('pointermove', e => setAim(e));
+  cv.addEventListener('pointerup', e => { setAim(e); drop(); });
+  window.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'ArrowDown' || e.key === 'Enter') {
+      const t = document.activeElement && document.activeElement.tagName;
+      if (t === 'BUTTON' || t === 'A') return;
+      e.preventDefault(); if (!e.repeat) drop();
+    } else if (['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) { keys[e.key] = true; e.preventDefault(); }
+  });
+  window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+  $('restart').addEventListener('click', reset);
+  $('again').addEventListener('click', reset);
+  $('mute').addEventListener('click', e => {
+    muted = !muted; wake();
+    e.currentTarget.textContent = muted ? 'Sound off' : 'Sound on';
+    e.currentTarget.setAttribute('aria-pressed', String(muted));
+  });
+
+  // ---------- Layout ----------
+  function fit() {
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    const s = Math.min(sw / W, sh / H);
+    const cw = Math.max(1, Math.floor(W * s)), ch = Math.max(1, Math.floor(H * s));
+    frame.style.width = cw + 'px'; frame.style.height = ch + 'px';
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+    view = cv.width / W;
+    drawNext();
+  }
+  window.addEventListener('resize', fit);
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(stage);
+
+  // ---------- Loop ----------
+  function frameLoop(t) {
+    const dt = Math.min(.033, (t - last) / 1000 || .016);
+    last = t;
+    update(dt);
+    draw();
+    requestAnimationFrame(frameLoop);
+  }
+
+  reset(); fit(); loadBest();
+  requestAnimationFrame(t => { last = t; frameLoop(t); });
+})();
+</script>
+</body>
+</html>
