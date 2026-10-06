@@ -40,9 +40,12 @@
   .over p b{font-weight:800;font-variant-numeric:tabular-nums}
   .over .actions{display:flex;gap:8px;margin-top:6px}
   footer{display:flex;flex-direction:column;gap:8px;padding-top:8px}
-  .tools{display:flex;justify-content:center;gap:8px}
+  .tools{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+  .song-info{text-align:center;font-size:13px;font-weight:600;opacity:.75;min-height:16px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .btn{border:0;background:var(--card);color:var(--ink);font:inherit;font-weight:700;font-size:14px;
     padding:9px 16px;border-radius:12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .btn[hidden]{display:none}
   .btn.primary{background:var(--ink);color:#fff;font-size:16px;padding:12px 24px}
   .btn.bmc{background:var(--coffee);color:#1a1a1a;font-size:15px;padding:11px 16px;width:100%}
   .btn:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
@@ -80,14 +83,18 @@
   </div>
 
   <footer>
+    <div class="song-info" id="songInfo" aria-live="polite"></div>
     <div class="tools">
       <button class="btn" id="restart">New game</button>
       <button class="btn" id="share">Share</button>
       <button class="btn" id="mute" aria-pressed="false">Sound on</button>
+      <button class="btn" id="addSongs">Add songs from your phone</button>
+      <button class="btn" id="nextSong" hidden>Next song</button>
     </div>
     <a class="btn bmc" href="https://www.buymeacoffee.com/gorj" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
   </footer>
 </div>
+<input type="file" id="songInput" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>
 
 <script>
 (() => {
@@ -150,7 +157,7 @@
     ui(); drawNext();
   }
 
-  // ---------- Audio ----------
+  // ---------- Audio (sound effects) ----------
   let ac = null, muted = false;
   function wake() {
     if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
@@ -164,6 +171,46 @@
     g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
     o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d);
   }
+
+  // ---------- Your music ----------
+  const music = { list: [], i: 0, fails: 0, audio: new Audio() };
+  music.audio.preload = 'auto';
+  music.audio.volume = .6;
+  function songUI() {
+    const n = music.list.length;
+    $('songInfo').textContent = n
+      ? 'Now playing: ' + music.list[music.i].name + (n > 1 ? ' (' + (music.i + 1) + ' of ' + n + ')' : '')
+      : '';
+    $('nextSong').hidden = n < 2;
+  }
+  music.setTrack = i => { music.i = i; music.audio.src = music.list[i].url; songUI(); };
+  music.play = () => {
+    if (!music.list.length) return;
+    if (!music.audio.src) music.setTrack(music.i);
+    const p = music.audio.play(); if (p && p.catch) p.catch(() => {});
+  };
+  music.next = () => {
+    if (!music.list.length) return;
+    music.setTrack((music.i + 1) % music.list.length);
+    music.play();
+  };
+  music.audio.addEventListener('ended', () => { music.fails = 0; music.next(); });
+  music.audio.addEventListener('playing', () => { music.fails = 0; });
+  music.audio.addEventListener('error', () => { if (++music.fails <= music.list.length) music.next(); });
+  function addSongs(files) {
+    const wasEmpty = !music.list.length;
+    for (const f of files) {
+      if (f.type.startsWith('audio/') || /\.(mp3|m4a|aac|wav|ogg|flac|opus)$/i.test(f.name)) {
+        music.list.push({ name: f.name.replace(/\.[^.]+$/, ''), url: URL.createObjectURL(f) });
+      }
+    }
+    if (!music.list.length) return;
+    if (wasEmpty) { music.setTrack(0); music.play(); } else songUI();
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) music.audio.pause();
+    else if (music.list.length && music.audio.src) music.play();
+  });
 
   // ---------- Best score (persisted when storage is available) ----------
   async function loadBest() {
@@ -487,9 +534,13 @@
   $('again').addEventListener('click', reset);
   $('mute').addEventListener('click', e => {
     muted = !muted; wake();
+    music.audio.muted = muted;
     e.currentTarget.textContent = muted ? 'Sound off' : 'Sound on';
     e.currentTarget.setAttribute('aria-pressed', String(muted));
   });
+  $('addSongs').addEventListener('click', () => $('songInput').click());
+  $('nextSong').addEventListener('click', () => music.next());
+  $('songInput').addEventListener('change', e => { addSongs(Array.from(e.target.files || [])); e.target.value = ''; });
 
   // ---------- Layout ----------
   function fit() {
